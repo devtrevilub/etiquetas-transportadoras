@@ -1,43 +1,158 @@
 # API de Integração — Etiquetas de Produtos (Sankhya)
 
-NestJS (Nest CLI oficial) + TypeORM (Oracle). Testada de ponta a ponta.
+API em **NestJS** (TypeScript) que permite às transportadoras consultarem, por conta própria, as
+etiquetas (de pedido e de volume) das cargas que vão transportar — dados que vêm do ERP
+**Sankhya**, via **Oracle** (TypeORM).
 
-## Novidades desta versão
+- **Consulta (GET)** — fluxo principal e ativo hoje. Cada transportadora autentica com login e
+  senha próprios e recebe só as cargas e etiquetas que são dela.
+- **Envio (POST)** — fluxo secundário, mantido no código mas não usado no momento. Pensado para
+  o Sankhya (ou um processo de disparo do lado dele) empurrar etiquetas para um sistema de
+  destino externo, se um dia isso for necessário.
 
-1. **Array único `etiquetas`** — `itens` (idRev) e `etiquetas` (etqVol) foram unidos num só
-   array dentro de cada `chaveNfe`, misturando os dois tipos, com sequência contínua.
-2. **`CNPJ` agora está no `SELECT`** (como literal `''` por enquanto, do seu lado) — o
-   `normalizar()` já lê essa coluna, então quando o join/valor real for definido no banco, não
-   precisa tocar em código nenhum aqui.
+## Sumário
 
-## Formato de resposta — atual
+- [Arquitetura e fluxo](#arquitetura-e-fluxo)
+- [Como rodar localmente](#como-rodar-localmente)
+- [Configuração (.env)](#configuração-env)
+- [Autenticação](#autenticação)
+- [Endpoints](#endpoints)
+- [Formato de resposta do GET](#formato-de-resposta-do-get)
+- [A consulta SQL](#a-consulta-sql)
+- [Modo mock (sem Oracle)](#modo-mock-sem-oracle)
+- [Scripts disponíveis](#scripts-disponíveis)
+- [Solução de problemas](#solução-de-problemas)
+- [Pendências / próximos passos](#pendências--próximos-passos)
+
+---
+
+## Arquitetura e fluxo
 
 ```
-GET /v1/etiquetas/carregamento
-Authorization: Basic base64(login:senha)
+                    ┌──────────────────────────┐
+  Transportadora ──▶│  GET /v1/etiquetas/      │
+  (login/senha       │  carregamento            │──▶ Oracle (Sankhya)
+   próprios)         │  (Basic Auth, filtra por │     via TypeORM
+                     │   FROTA da credencial)   │
+                     └──────────────────────────┘
+
+                    ┌──────────────────────────┐
+  Sankhya / job ───▶│  POST /v1/etiquetas      │
+  de disparo         │  POST /v1/etiquetas/lote │──▶ Sistema de Destino
+  (Bearer token)     │  (hoje inativo)          │     (externo)
+                     └──────────────────────────┘
 ```
+
+Stack: **NestJS** (via Nest CLI oficial) + **TypeORM** (driver `oracledb`, modo *thin*, sem
+precisar de Oracle Instant Client) + **Swagger** (documentação interativa em `/docs`).
+
+## Como rodar localmente
+
+```bash
+npm install
+cp .env.example .env     # ajuste as variáveis — comece com DB_MODE=mock
+npm run build
+npm start
+```
+
+Para desenvolvimento (recompila e reinicia ao salvar um arquivo):
+```bash
+npm run start:dev
+```
+
+Documentação interativa (Swagger UI), com os dois esquemas de autenticação prontos pra testar
+direto na página: **http://localhost:3000/docs**
+
+## Configuração (`.env`)
+
+O arquivo é carregado com **caminho absoluto**, calculado a partir de onde o app está rodando —
+não importa de qual diretório você dispara o `npm start`. Ainda assim, ele precisa existir na
+raiz do projeto (mesmo nível do `package.json`), com o nome exato `.env` (não `.env.example`).
+
+| Variável | Obrigatória | Descrição |
+|---|---|---|
+| `PORT` | Não (padrão `3000`) | Porta HTTP da API |
+| `DB_MODE` | Não (padrão `oracle`) | `oracle` conecta de verdade; `mock` serve dados de exemplo, sem precisar do banco |
+| `ORACLE_CONNECT_STRING` | Recomendada | Connect string única, formato "Easy Connect": `host:porta/SERVICE_NAME` |
+| `ORACLE_HOST` / `ORACLE_PORT` / `ORACLE_SID` / `ORACLE_SERVICE_NAME` | Alternativa | Campos separados, usados só se `ORACLE_CONNECT_STRING` estiver vazio |
+| `ORACLE_USER` / `ORACLE_PASSWORD` | Sim (modo oracle) | Credenciais do banco |
+| `ORACLE_LOGGING` | Não | `true` loga todo SQL executado pelo TypeORM |
+| `AUTH_TOKENS` | Sim (se o envio for usado) | Tokens Bearer aceitos nos endpoints `POST` (Sankhya) |
+| `TRANSPORTADORAS_CREDENCIAIS` | Sim | Credenciais Basic Auth das transportadoras — ver [Autenticação](#autenticação) |
+| `DESTINO_BASE_URL` / `DESTINO_API_KEY` | Se o envio for usado | Configuração do Sistema de Destino (fluxo `POST`, hoje inativo) |
+| `RATE_LIMIT_PER_MINUTE` | Não (padrão `120`) | Limite de requisições por minuto, por credencial |
+
+Veja `.env.example` para o arquivo completo, comentado.
+
+## Autenticação
+
+A API usa **dois esquemas diferentes**, para dois públicos diferentes:
+
+### Transportadoras → `GET` → HTTP Basic Auth
+
+Cada transportadora tem login e senha próprios, além de um valor de **`FROTA`** — usado para
+filtrar a consulta no Oracle (`FROTA LIKE '%<valor>%'` em `AD_CABCARREGAMENTO`), garantindo que
+cada uma só veja as próprias cargas. Esse valor vem **sempre** da credencial autenticada, nunca
+de um parâmetro que o cliente poderia manipular.
+
+Configurado em `TRANSPORTADORAS_CREDENCIAIS`, formato `login:senha:FROTA:Nome Amigável`
+(nome opcional), separado por vírgula para várias transportadoras:
+```
+TRANSPORTADORAS_CREDENCIAIS=transp-risso:senha123:RISSO:Transportadora Risso,transp-azul:senha456:AZUL:Transportadora Azul
+```
+
+Exemplo de chamada:
+```bash
+curl -u transp-risso:senha123 http://localhost:3000/v1/etiquetas/carregamento
+```
+
+⚠️ **Basic Auth só é seguro com HTTPS em produção** — login/senha vão em base64, que é
+reversível, não criptografado.
+
+### Sankhya → `POST` (fluxo inativo) → Bearer Token
+
+```
+Authorization: Bearer <token>
+```
+Tokens configurados em `AUTH_TOKENS` (lista separada por vírgula). Só é relevante se/quando o
+fluxo de envio for ativado.
+
+## Endpoints
+
+| Método | Rota | Autenticação | Descrição | Status |
+|---|---|---|---|---|
+| `GET` | `/v1/etiquetas/carregamento` | Basic (transportadora) | Lista as cargas da transportadora autenticada, agrupadas por `chaveNfe` | **Ativo** |
+| `POST` | `/v1/etiquetas` | Bearer (Sankhya) | Envia uma etiqueta ao Sistema de Destino | Mantido, inativo |
+| `POST` | `/v1/etiquetas/lote` | Bearer (Sankhya) | Envia várias etiquetas em lote | Mantido, inativo |
+| `GET` | `/health` | — | Health check | Ativo |
+| `GET` | `/docs` | — | Swagger UI | Ativo |
+
+Os endpoints `POST` também exigem o header `Idempotency-Key` (uma chave única por tentativa de
+envio), para evitar duplicidade em reenvios.
+
+## Formato de resposta do GET
 
 ```json
 [
   {
     "ordemCarga": 165379,
-    "cnpj": null,
     "chavesNfe": [
       {
         "chaveNfe": "35260948059343000158550010000806821094076554",
+        "cnpj": "12345678912345",
         "numnota": 18955132,
         "serieNota": 3,
         "totalEtiquetas": 9,
         "etiquetas": [
-          { "idRev": 5312513, "sequencia": 1 },
-          { "idRev": 5312697, "sequencia": 2 },
-          { "etqVol": "VOL10939204", "sequencia": 3 },
-          { "etqVol": "VOL10939207", "sequencia": 4 },
-          { "etqVol": "VOL10939208", "sequencia": 5 },
-          { "etqVol": "VOL10939244", "sequencia": 6 },
-          { "etqVol": "VOL10939788", "sequencia": 7 },
-          { "etqVol": "VOL10939789", "sequencia": 8 },
-          { "etqVol": "VOL10939790", "sequencia": 9 }
+          { "barCode": 5312513, "sequencia": 1 },
+          { "barCode": 5312697, "sequencia": 2 },
+          { "barCode": "VOL10939204", "sequencia": 3 },
+          { "barCode": "VOL10939207", "sequencia": 4 },
+          { "barCode": "VOL10939208", "sequencia": 5 },
+          { "barCode": "VOL10939244", "sequencia": 6 },
+          { "barCode": "VOL10939788", "sequencia": 7 },
+          { "barCode": "VOL10939789", "sequencia": 8 },
+          { "barCode": "VOL10939790", "sequencia": 9 }
         ]
       }
     ]
@@ -45,91 +160,83 @@ Authorization: Basic base64(login:senha)
 ]
 ```
 
-Isso reproduz exatamente o formato que você mandou: um array só (`etiquetas`), com itens de
-`idRev` primeiro e `etqVol` depois, sequência contínua (1 a 9), e `totalEtiquetas: 9`.
+Se a transportadora não tiver nenhuma carga, a resposta é `200` com lista vazia `[]`.
 
-No TypeScript, cada item do array é `{ idRev, sequencia }` **ou** `{ etqVol, sequencia }` (tipo
-`ItemEtiqueta` em `etiquetas-agrupador.ts`) — então, se for consumir isso em código (não só
-exibir), é só checar se o item tem `idRev` ou `etqVol` pra saber o tipo.
+**Hierarquia:**
+- **`ordemCarga`** — a ordem de carga/carregamento. Uma transportadora pode ter várias no mesmo
+  período (por isso a resposta é uma lista).
+- **`chavesNfe`** — dentro de cada ordem de carga, uma entrada por nota fiscal. Cada `chaveNfe`
+  (chave de acesso da NF-e) corresponde a exatamente uma nota, por isso `cnpj`, `numnota` e
+  `serieNota` aparecem como valores únicos, não como listas. Pedidos ainda não faturados (sem
+  nota vinculada ainda) aparecem com `"chaveNfe": null`.
+- **`totalEtiquetas`** — soma de todos os itens do array `etiquetas` daquela nota.
+- **`etiquetas`** — array único contendo dois tipos de item, misturados:
+  - **Pré-fatura**: `{ "barCode": <número>, "sequencia": <n> }` — identifica um item/produto do
+    pedido antes de ser faturado (o antigo `idRev`).
+  - **Pós-fatura**: `{ "barCode": <string>, "sequencia": <n> }` — identifica uma etiqueta de
+    volume física, já gerada (o antigo `etqVol`, no formato `VOL...`).
 
-## `CNPJ`
+  A diferença entre os dois tipos é o **tipo de dado** de `barCode` (número vs. string) — quem
+  consome a API deve checar isso para saber qual dos dois casos está tratando.
 
-Já está no `SELECT` (nos dois ramos do `UNION ALL`, como você mandou) e o `normalizar()` já lê
-`l.CNPJ` normalmente. Hoje ainda vem sempre `null` na resposta porque a coluna está como literal
-`''` na sua SQL — assim que o join/valor real for definido do lado do banco, a API já vai
-refletir isso automaticamente, sem precisar de nenhuma mudança de código.
+  A numeração de `sequencia` é **contínua**: os itens pré-fatura vêm primeiro (1, 2, 3...), e os
+  pós-fatura continuam a partir daí — não reinicia em 1.
 
-## SQL usada (implementada em `src/etiquetas/etiquetas-query.service.ts`)
+## A consulta SQL
 
-A mesma estrutura de antes (`AD_ITECARREGAMENTO`/`AD_ITECARREGAMENTOVOL` → `AD_PEDCARREGAMENTO`
-→ `TGFVAR` → `TGFCAB`), agora com `CNPJ` no `SELECT`. Filtro por `FROTA` (substring) e
-`STATUS = 'F2'`, data fixa em `SYSDATE - 1`.
+A consulta roda contra as tabelas do Sankhya:
 
-### ⚠️ Pontos em aberto, documentados mas não alterados
+- **`AD_CABCARREGAMENTO`** — cabeçalho da ordem de carga (`FROTA`, `DATA`, `STATUS`). É aqui que
+  o filtro por transportadora (`FROTA LIKE '%...%'`) e por status (`STATUS = 'F2'`) acontece.
+- **`AD_ITECARREGAMENTO`** — itens do pedido ainda não faturados (`IDREV`).
+- **`AD_ITECARREGAMENTOVOL`** — etiquetas de volume já geradas (`ETQVOL`).
+- **`AD_PEDCARREGAMENTO` → `TGFVAR` (`NUNOTAORIG`) → `TGFCAB`** — join que resolve `NUMNOTA`,
+  `SERIENOTA` e `CHAVENFE` a partir do pedido/volume, tanto pros itens pré-fatura quanto pros
+  pós-fatura (por isso os dois acabam batendo na mesma nota/chave quando aplicável).
 
-1. `FROTA LIKE '%...%'` é por substring.
-2. Data fixa em `SYSDATE - 1` + `STATUS = 'F2'`.
-3. **Modo mock** não tem `CHAVENFE`/`NUMNOTA`/`SERIENOTA`/`CNPJ` — só `IDREV`/`ETQVOL` reais; o
-   resto cai em `null`, tudo num grupo só (`chaveNfe: null`). O array único com os dois tipos
-   misturados foi testado com dados sintéticos (`npm run test:agrupamento`).
-
-## Autenticação das transportadoras (via `FROTA`)
-
-```
-TRANSPORTADORAS_CREDENCIAIS=transp-risso:senha123:RISSO:Transportadora Risso,transp-outra:senha456:OUTRAFROTA:Outra Transportadora
-```
-⚠️ Basic Auth só é seguro com HTTPS em produção.
-
-## Conexão com o Oracle
-
-1. **`ORACLE_CONNECT_STRING`** (recomendada) — `host:porta/SERVICE_NAME`.
-2. Campos separados: `ORACLE_HOST`, `ORACLE_PORT`, `ORACLE_SID` **ou** `ORACLE_SERVICE_NAME`.
+Pontos que valem registrar:
+- O filtro de `FROTA` é por **substring** (`LIKE '%...%'`) — duas transportadoras com nomes onde
+  uma contém a outra (ex.: `RISSO` e `RISSOLOG`) podem ter sobreposição.
+- A data está fixa em `TRUNC(DATA) = TRUNC(SYSDATE) - 1` (o dia anterior), combinada com
+  `STATUS = 'F2'`. Se precisar virar configurável/dinâmico, isso vai exigir uma mudança de código.
 
 ## Modo mock (sem Oracle)
 
+Útil para desenvolver/testar sem depender de acesso ao banco:
 ```
 # .env
 DB_MODE=mock
 ```
+Serve dados de exemplo a partir de um CSV de amostra. Como esse CSV não tem todas as colunas
+reais (`FROTA`, `DATA`, `STATUS`, `CHAVENFE`, `CNPJ` etc.), o modo mock não aplica esses filtros
+e alguns campos vêm sempre nulos — a API avisa isso no log ao usar esse modo.
 
-## Rodando localmente
+## Scripts disponíveis
 
-```bash
-npm install
-cp .env.example .env   # comece com DB_MODE=mock
-npm run build
-npm start
-npm run start:dev   # desenvolvimento, recompila ao salvar
-```
+| Script | O que faz |
+|---|---|
+| `npm run build` | Compila o projeto (`nest build`) |
+| `npm start` | Roda a versão compilada (`dist/main.js`) |
+| `npm run start:dev` | Modo desenvolvimento, recompila e reinicia ao salvar |
+| `npm run check` | Só checa tipos TypeScript, sem gerar arquivos |
+| `npm run test:agrupamento` | Testa a lógica de agrupamento isoladamente (sem precisar subir o servidor nem o Oracle) |
+| `npm run docs:export` | Exporta a especificação OpenAPI gerada para `openapi.json` |
 
-Swagger UI: `http://localhost:3000/docs`
-Testar só a lógica de agrupamento: `npm run test:agrupamento`
+## Solução de problemas
 
-### Testando o envio (fluxo secundário) localmente
+Problemas reais que já apareceram e suas causas — deixado aqui para referência futura:
 
-```bash
-node mock-destino.js &   # destino falso na porta 4000
-npm start
-```
+**Erro `NJS-503`, endereço `fe80::...` ou `127.0.0.1` ao conectar no Oracle**
+Normalmente significa que `ORACLE_HOST`/`ORACLE_CONNECT_STRING` chegaram **vazios** ao driver —
+ou seja, o `.env` não foi encontrado/carregado. A API loga isso claramente na inicialização,
+dizendo se encontrou o arquivo `.env` ou não. Confirme que ele existe na raiz do projeto, com as
+variáveis de fato preenchidas.
 
-## Endpoints
+**Erro `ORA-12504` ("listener was not given the SERVICE_NAME")**
+A conexão chegou no listener, mas faltou `SERVICE_NAME` (ou foi usado `SID` num banco que na
+verdade exige `SERVICE_NAME` — comum em bancos com PDB/multitenant). Tente
+`ORACLE_CONNECT_STRING=host:porta/SERVICE_NAME` com o nome do serviço, não o SID.
 
-| Método | Rota | Autenticação | Descrição | Status |
-|---|---|---|---|---|
-| GET | `/v1/etiquetas/carregamento` | Basic (transportadora, filtra por `FROTA`) | Lista as cargas da transportadora, agrupadas por `chaveNfe` | **Ativo** |
-| POST | `/v1/etiquetas` | Bearer (Sankhya) | Envia uma etiqueta | Mantido, não ativo |
-| POST | `/v1/etiquetas/lote` | Bearer (Sankhya) | Envia em lote | Mantido, não ativo |
-| GET | `/health` | — | Health check | Ativo |
-| GET | `/docs` | — | Swagger UI | Ativo |
-
-## Próximos passos sugeridos
-
-- [ ] Definir o valor/join real de `CNPJ` do lado do banco (código já está pronto pra receber)
-- [ ] Testar a SQL contra o Oracle real (sem acesso a um aqui)
-- [ ] Confirmar se `LIKE` por substring em `FROTA` é aceitável
-- [ ] Confirmar se `SYSDATE - 1` e `STATUS = 'F2'` devem virar configuráveis
-- [ ] Migrar credenciais das transportadoras para o banco (com senha com hash) antes de produção
-- [ ] Confirmar HTTPS em produção (obrigatório com Basic Auth)
-- [ ] Quando o envio for ativado: confirmar API real do Sistema de Destino
-- [ ] Trocar idempotência/rate-limit em memória por Redis antes de produção
-- [ ] Escrever testes automatizados (unitários + e2e com `@nestjs/testing`)
+**`Cannot find module '@nestjs/common/internal'` ao rodar em modo dev**
+Era um problema do `ts-node-dev` (pacote sem manutenção) com versões recentes do Node/NestJS —
+resolvido ao migrar para o `nest start --watch` oficial.

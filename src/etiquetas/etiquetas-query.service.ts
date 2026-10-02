@@ -90,14 +90,6 @@ export class EtiquetasQueryService {
     return linhas.map((l) => this.normalizar(l));
   }
 
-  /**
-   * ⚠️ O mock-data.json (gerado do CSV de exemplo) não tem colunas FROTA,
-   * DATA, STATUS, CHAVENFE, SERIENOTA nem CNPJ — o arquivo de amostra não
-   * trouxe essa informação. Em modo mock, portanto, só IDREV/ETQVOL vêm
-   * preenchidos; o resto cai em null, então tudo cai num grupo só
-   * (chaveNfe: null). Isso é só para desenvolvimento; o comportamento de
-   * verdade só vale conectado ao Oracle real.
-   */
   private async buscarViaMock(frota: string): Promise<LinhaOrigem[]> {
     this.logger.warn(
       `Servindo dados de exemplo (mock-data.json) para frota="${frota}" — DB_MODE=mock, não conectado ao Oracle. ` +

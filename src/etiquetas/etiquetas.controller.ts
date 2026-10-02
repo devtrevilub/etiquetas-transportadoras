@@ -44,9 +44,6 @@ export class EtiquetasController {
   /**
    * Envio de etiqueta ao Sistema de Destino (autenticado via Bearer token
    * do Sistema de Origem — Sankhya / processo de disparo).
-   *
-   * ⚠️ Não é o fluxo ativo no momento (as transportadoras consultam via GET
-   * acima) — mantido pronto para quando o envio for necessário.
    */
   @Post()
   @HttpCode(HttpStatus.OK)
