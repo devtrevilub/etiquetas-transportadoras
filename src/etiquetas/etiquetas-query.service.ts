@@ -49,12 +49,12 @@ export class EtiquetasQueryService {
             LEFT JOIN AD_PEDCARREGAMENTO PED ON PED.NUMNOTA = ITE.NUMPEDIDO
             LEFT JOIN TGFVAR VAR ON PED.NUNOTA = VAR.NUNOTAORIG
             LEFT JOIN TGFCAB NFE ON NFE.NUNOTA = VAR.NUNOTA
-            LEFT JOIN TGFPAR PAR ON PAR.CODPARC = NFE.CODPARCDEST
+            LEFT JOIN TGFPAR PAR ON PAR.CODPARC = NFE.CODEMP
           WHERE ITE.IDREV IS NOT NULL
               AND ITE.ORDEMCARGA IN (
                   SELECT ORDEMCARGA FROM AD_CABCARREGAMENTO
                   WHERE FROTA LIKE '%' || :1 || '%'
-                      AND TRUNC(DATA) = TRUNC(SYSDATE) - 1
+                      AND TRUNC(DATA) = TRUNC(SYSDATE)
                       AND STATUS = 'F2'
               )
 
@@ -72,12 +72,12 @@ export class EtiquetasQueryService {
             LEFT JOIN AD_PEDCARREGAMENTO PED ON PED.NUNOTA = VOL.NUNOTA
             LEFT JOIN TGFVAR VAR ON PED.NUNOTA = VAR.NUNOTAORIG
             LEFT JOIN TGFCAB NFE ON NFE.NUNOTA = VAR.NUNOTA
-            LEFT JOIN TGFPAR PAR ON PAR.CODPARC = NFE.CODPARCDEST
+            LEFT JOIN TGFPAR PAR ON PAR.CODPARC = NFE.CODEMP
           WHERE VOL.ETQVOL IS NOT NULL
               AND VOL.ORDEMCARGA IN (
                   SELECT ORDEMCARGA FROM AD_CABCARREGAMENTO
                   WHERE FROTA LIKE '%' || :2 || '%'
-                      AND TRUNC(DATA) = TRUNC(SYSDATE) - 1
+                      AND TRUNC(DATA) = TRUNC(SYSDATE)
                       AND STATUS = 'F2'
               )
       )
