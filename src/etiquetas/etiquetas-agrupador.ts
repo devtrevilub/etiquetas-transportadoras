@@ -76,12 +76,8 @@ export function agruparPorOrdemCarga(linhas: LinhaOrigem[]): OrdemCargaAgrupada[
 
   for (const [ordemCarga, linhasDaOrdem] of porOrdem.entries()) {
     const porChave = new Map<string | null, GrupoChave>();
-    let cnpj: string | null = null;
 
     for (const linha of linhasDaOrdem) {
-      if (cnpj == null && linha.cnpj != null) {
-        cnpj = linha.cnpj;
-      }
 
       let grupo = porChave.get(linha.chaveNfe);
       if (!grupo) {
@@ -91,6 +87,9 @@ export function agruparPorOrdemCarga(linhas: LinhaOrigem[]): OrdemCargaAgrupada[
 
       if (grupo.numnota == null && linha.numnota != null) {
         grupo.numnota = linha.numnota;
+      }
+      if (grupo.cnpj == null && linha.cnpj != null) {
+        grupo.cnpj = linha.cnpj;
       }
       if (grupo.serieNota == null && linha.serieNota != null) {
         grupo.serieNota = linha.serieNota;
@@ -116,7 +115,7 @@ export function agruparPorOrdemCarga(linhas: LinhaOrigem[]): OrdemCargaAgrupada[
 
         return {
           chaveNfe,
-          cnpj: grupo.cnpj ?? cnpj,
+          cnpj: grupo.cnpj,
           numnota: grupo.numnota,
           serieNota: grupo.serieNota,
           totalEtiquetas: etiquetas.length,
