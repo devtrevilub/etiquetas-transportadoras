@@ -21,9 +21,7 @@ export class EtiquetasQueryService {
    * (etqVol), com sequência contínua entre os dois.
    */
   async buscarPorTransportadora(frota: string): Promise<OrdemCargaAgrupada[]> {
-    const linhas = this.dataSource
-      ? await this.buscarViaOracle(frota)
-      : await this.buscarViaMock(frota);
+    const linhas = this.dataSource ? await this.buscarViaOracle(frota) : [];
 
     return agruparPorOrdemCarga(linhas);
   }
@@ -88,16 +86,6 @@ export class EtiquetasQueryService {
     // os binds posicionais :1 e :2.
     const linhas: any[] = await this.dataSource!.query(sql, [frota, frota]);
     return linhas.map((l) => this.normalizar(l));
-  }
-
-  private async buscarViaMock(frota: string): Promise<LinhaOrigem[]> {
-    this.logger.warn(
-      `Servindo dados de exemplo (mock-data.json) para frota="${frota}" — DB_MODE=mock, não conectado ao Oracle. ` +
-        `Filtro por FROTA/DATA/STATUS NÃO aplicado, e chaveNfe/numnota/serieNota/cnpj sempre vêm nulos (mock não tem essas colunas).`,
-    );
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const dados = require('./mock-data.json') as any[];
-    return dados.map((l) => this.normalizar(l));
   }
 
   private normalizar(l: Record<string, any>): LinhaOrigem {
