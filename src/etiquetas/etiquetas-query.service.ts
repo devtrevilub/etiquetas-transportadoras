@@ -29,64 +29,76 @@ export class EtiquetasQueryService {
   private async buscarViaOracle(frota: string): Promise<LinhaOrigem[]> {
     const sql = `
       SELECT DISTINCT
-          ORDEMCARGA,
-          IDREV,
-          NUMNOTA,
-          ETQVOL,
-          CHAVENFE,
-          SERIENOTA,
-          CNPJ
-      FROM (
-          SELECT DISTINCT
-              ITE.ORDEMCARGA,
-              ITE.IDREV,
-              NFE.NUMNOTA,
-              NULL AS ETQVOL,
-              NFE.SERIENOTA,
-              NVL(NFE.CHAVENFE, '') AS CHAVENFE,
-              PAR.CGC_CPF AS CNPJ
-          FROM AD_ITECARREGAMENTO ITE
-            LEFT JOIN AD_PEDCARREGAMENTO PED ON PED.NUMNOTA = ITE.NUMPEDIDO
-            LEFT JOIN TGFVAR VAR ON PED.NUNOTA = VAR.NUNOTAORIG
-            LEFT JOIN TGFCAB NFE ON NFE.NUNOTA = VAR.NUNOTA
-            LEFT JOIN TGFPAR PAR ON PAR.CODPARC = NFE.CODEMP
-          WHERE ITE.IDREV IS NOT NULL
-              AND ITE.ORDEMCARGA IN (
-                  SELECT ORDEMCARGA FROM AD_CABCARREGAMENTO
-                  WHERE FROTA LIKE '%' || :1 || '%'
-                      AND TRUNC(DATA) = TRUNC(SYSDATE)
-                      AND STATUS = 'F2'
-              )
+      ORDEMCARGA,
+      IDREV,
+      NUMNOTA,
+      ETQVOL,
+      CHAVENFE,
+      SERIENOTA,
+      CNPJ
+  FROM (
+      SELECT DISTINCT
+          ITE.ORDEMCARGA,
+          ITE.IDREV,
+          NFE.NUMNOTA,
+          NULL AS ETQVOL,
+          NFE.SERIENOTA,
+          NVL(NFE.CHAVENFE, '') AS CHAVENFE,
+          PAR.CGC_CPF AS CNPJ
+      FROM AD_ITECARREGAMENTO ITE
+        LEFT JOIN AD_PEDCARREGAMENTO PED ON PED.NUMNOTA = ITE.NUMPEDIDO
+        LEFT JOIN TGFVAR VAR ON PED.NUNOTA = VAR.NUNOTAORIG
+        LEFT JOIN TGFCAB NFE ON NFE.NUNOTA = VAR.NUNOTA
+        LEFT JOIN TGFPAR PAR ON PAR.CODPARC = NFE.CODEMP
+      WHERE ITE.IDREV IS NOT NULL
+          AND ITE.ORDEMCARGA IN (
+              SELECT ORDEMCARGA 
+              FROM AD_CABCARREGAMENTO
+              WHERE FROTA LIKE '%' || :1 || '%'
+                  AND STATUS = 'F2'
+                  AND TRUNC(DATA) = (
+                      SELECT MAX(TRUNC(DATA)) 
+                      FROM AD_CABCARREGAMENTO 
+                      WHERE FROTA LIKE '%' || :2 || '%' 
+                        AND STATUS = 'F2'
+                  )
+          )
 
-          UNION ALL
+      UNION ALL
 
-          SELECT DISTINCT
-              VOL.ORDEMCARGA,
-              NULL AS IDREV,
-              NFE.NUMNOTA,
-              VOL.ETQVOL,
-              NFE.SERIENOTA,
-              NVL(NFE.CHAVENFE, '') AS CHAVENFE,
-              PAR.CGC_CPF AS CNPJ
-          FROM AD_ITECARREGAMENTOVOL VOL
-            LEFT JOIN AD_PEDCARREGAMENTO PED ON PED.NUNOTA = VOL.NUNOTA
-            LEFT JOIN TGFVAR VAR ON PED.NUNOTA = VAR.NUNOTAORIG
-            LEFT JOIN TGFCAB NFE ON NFE.NUNOTA = VAR.NUNOTA
-            LEFT JOIN TGFPAR PAR ON PAR.CODPARC = NFE.CODEMP
-          WHERE VOL.ETQVOL IS NOT NULL
-              AND VOL.ORDEMCARGA IN (
-                  SELECT ORDEMCARGA FROM AD_CABCARREGAMENTO
-                  WHERE FROTA LIKE '%' || :2 || '%'
-                      AND TRUNC(DATA) = TRUNC(SYSDATE)
-                      AND STATUS = 'F2'
-              )
-      )
-      ORDER BY ORDEMCARGA, NUMNOTA NULLS LAST
+      SELECT DISTINCT
+          VOL.ORDEMCARGA,
+          NULL AS IDREV,
+          NFE.NUMNOTA,
+          VOL.ETQVOL,
+          NFE.SERIENOTA,
+          NVL(NFE.CHAVENFE, '') AS CHAVENFE,
+          PAR.CGC_CPF AS CNPJ
+      FROM AD_ITECARREGAMENTOVOL VOL
+        LEFT JOIN AD_PEDCARREGAMENTO PED ON PED.NUNOTA = VOL.NUNOTA
+        LEFT JOIN TGFVAR VAR ON PED.NUNOTA = VAR.NUNOTAORIG
+        LEFT JOIN TGFCAB NFE ON NFE.NUNOTA = VAR.NUNOTA
+        LEFT JOIN TGFPAR PAR ON PAR.CODPARC = NFE.CODEMP
+      WHERE VOL.ETQVOL IS NOT NULL
+          AND VOL.ORDEMCARGA IN (
+              SELECT ORDEMCARGA 
+              FROM AD_CABCARREGAMENTO
+              WHERE FROTA LIKE '%' || :3 || '%'
+                  AND STATUS = 'F2'
+                  AND TRUNC(DATA) = (
+                      SELECT MAX(TRUNC(DATA)) 
+                      FROM AD_CABCARREGAMENTO 
+                      WHERE FROTA LIKE '%' || :4 || '%' 
+                        AND STATUS = 'F2'
+                  )
+          )
+  )
+  ORDER BY ORDEMCARGA, NUMNOTA NULLS LAST
     `;
     // O valor de "frota" é repetido (uma vez por ramo do UNION ALL) — por
     // isso o array de parâmetros tem o mesmo valor duas vezes, casando com
-    // os binds posicionais :1 e :2.
-    const linhas: any[] = await this.dataSource!.query(sql, [frota, frota]);
+    // os binds posicionais :3 e :4.
+    const linhas: any[] = await this.dataSource!.query(sql, [frota, frota, frota, frota]);
     return linhas.map((l) => this.normalizar(l));
   }
 
