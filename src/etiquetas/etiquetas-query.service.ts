@@ -131,7 +131,7 @@ export class EtiquetasQueryService {
                   SELECT ORDEMCARGA FROM AD_CABCARREGAMENTO
                   WHERE FROTA LIKE '%' || :1 || '%'
                       AND TRUNC(DATA) = TRUNC(SYSDATE)
-                      AND STATUS = 'F2'
+                      AND STATUS = 'F'
               )
 
           UNION ALL
@@ -154,7 +154,7 @@ export class EtiquetasQueryService {
                   SELECT ORDEMCARGA FROM AD_CABCARREGAMENTO
                   WHERE FROTA LIKE '%' || :2 || '%'
                       AND TRUNC(DATA) = TRUNC(SYSDATE)
-                      AND STATUS = 'F2'
+                      AND STATUS = 'F'
               )
       )
       ORDER BY ORDEMCARGA, NUMNOTA NULLS LAST
