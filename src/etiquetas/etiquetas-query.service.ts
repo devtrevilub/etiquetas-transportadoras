@@ -102,7 +102,7 @@ export class EtiquetasQueryService {
   //   return linhas.map((l) => this.normalizar(l));
   // }
 
-    private async buscarViaOracle(frota: string): Promise<LinhaOrigem[]> {
+  private async buscarViaOracle(frota: string): Promise<LinhaOrigem[]> {
     const sql = `
       SELECT DISTINCT
           ORDEMCARGA,
