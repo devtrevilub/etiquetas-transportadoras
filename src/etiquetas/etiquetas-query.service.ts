@@ -105,59 +105,145 @@ export class EtiquetasQueryService {
   private async buscarViaOracle(frota: string): Promise<LinhaOrigem[]> {
     const sql = `
       SELECT DISTINCT
-          ORDEMCARGA,
-          IDREV,
-          NUMNOTA,
-          ETQVOL,
-          CHAVENFE,
-          SERIENOTA,
-          CNPJ
-      FROM (
-          SELECT DISTINCT
-              ITE.ORDEMCARGA,
-              ITE.IDREV,
-              NFE.NUMNOTA,
-              NULL AS ETQVOL,
-              NFE.SERIENOTA,
-              NVL(NFE.CHAVENFE, '') AS CHAVENFE,
-              PAR.CGC_CPF AS CNPJ
-          FROM AD_ITECARREGAMENTO ITE
-            LEFT JOIN AD_PEDCARREGAMENTO PED ON PED.NUMNOTA = ITE.NUMPEDIDO
-            LEFT JOIN TGFVAR VAR ON PED.NUNOTA = VAR.NUNOTAORIG
-            LEFT JOIN TGFCAB NFE ON NFE.NUNOTA = VAR.NUNOTA
-            LEFT JOIN TGFPAR PAR ON PAR.CODPARC = NFE.CODEMP
-          WHERE ITE.IDREV IS NOT NULL
-              AND ITE.ORDEMCARGA IN (
-                  SELECT ORDEMCARGA FROM AD_CABCARREGAMENTO
-                  WHERE FROTA LIKE '%' || :1 || '%'
-                      AND TRUNC(DATA) = TRUNC(SYSDATE)
-                      AND STATUS = 'F'
-              )
+    ORDEMCARGA,
+    IDREV,
+    NUMNOTA,
+    ETQVOL,
+    CHAVENFE,
+    SERIENOTA,
+    CNPJ
+FROM (
+    SELECT DISTINCT
+        PED.ORDEMCARGA,
+        ITE.IDREV,
 
-          UNION ALL
+        COALESCE(
+            ADV.NUMNOTA,
+            NFE.NUMNOTA
+        ) AS NUMNOTA,
 
-          SELECT DISTINCT
-              VOL.ORDEMCARGA,
-              NULL AS IDREV,
-              NFE.NUMNOTA,
-              VOL.ETQVOL,
-              NFE.SERIENOTA,
-              NVL(NFE.CHAVENFE, '') AS CHAVENFE,
-              PAR.CGC_CPF AS CNPJ
-          FROM AD_ITECARREGAMENTOVOL VOL
-            LEFT JOIN AD_PEDCARREGAMENTO PED ON PED.NUNOTA = VOL.NUNOTA
-            LEFT JOIN TGFVAR VAR ON PED.NUNOTA = VAR.NUNOTAORIG
-            LEFT JOIN TGFCAB NFE ON NFE.NUNOTA = VAR.NUNOTA
-            LEFT JOIN TGFPAR PAR ON PAR.CODPARC = NFE.CODEMP
-          WHERE VOL.ETQVOL IS NOT NULL
-              AND VOL.ORDEMCARGA IN (
-                  SELECT ORDEMCARGA FROM AD_CABCARREGAMENTO
-                  WHERE FROTA LIKE '%' || :2 || '%'
-                      AND TRUNC(DATA) = TRUNC(SYSDATE)
-                      AND STATUS = 'F'
-              )
-      )
-      ORDER BY ORDEMCARGA, NUMNOTA NULLS LAST
+        NULL AS ETQVOL,
+
+        COALESCE(
+            ADV.SERIENOTA,
+            NFE.SERIENOTA
+        ) AS SERIENOTA,
+
+        COALESCE(
+            ADV.CHAVENFE,
+            NFE.CHAVENFE
+        ) AS CHAVENFE,
+
+        COALESCE(
+            ADV.CGC_CPF,
+            PAR.CGC_CPF
+        ) AS CNPJ
+
+    FROM AD_PEDCARREGAMENTO PED
+
+        LEFT JOIN AD_ITECARREGAMENTO ITE
+            ON PED.NUMNOTA = ITE.NUMPEDIDO
+
+        LEFT JOIN TGFVAR VAR
+            ON PED.NUNOTA = VAR.NUNOTAORIG
+
+        LEFT JOIN TGFCAB NFE
+            ON NFE.NUNOTA = VAR.NUNOTA
+            
+        LEFT JOIN TGFPAR PAR
+            ON PAR.CODPARC = NFE.CODPARC
+            
+        LEFT JOIN (
+        SELECT 
+            ADP.ORDEMCARGA,
+            ADV.NUNOTAVENDA,
+            NFE.NUMNOTA,
+            NFE.SERIENOTA,
+            NFE.CHAVENFE,
+            PAR.CGC_CPF,
+            ADP.NUNOTA
+        FROM AD_PEDCARREGAMENTO ADP
+            LEFT JOIN AD_VENDAIPIRANGA ADV ON ADV.NUNOTASEP = ADP.NUNOTA
+            LEFT JOIN TGFCAB NFE ON NFE.NUNOTA = ADV.NUNOTAVENDA
+            LEFT JOIN TGFPAR PAR ON PAR.CODPARC = NFE.CODPARC
+        ) ADV ON ADV.NUNOTA = PED.NUNOTA
+    WHERE ITE.IDREV IS NOT NULL
+
+        AND PED.ORDEMCARGA IN (
+            SELECT ORDEMCARGA
+            FROM AD_CABCARREGAMENTO
+            WHERE FROTA LIKE '%' || :1 || '%'
+                AND TRUNC(DATA) = TRUNC(SYSDATE)
+                AND STATUS = 'F2'
+        )
+
+    UNION ALL
+
+    SELECT DISTINCT
+        PED.ORDEMCARGA,
+        NULL AS IDREV,
+
+        COALESCE(
+            ADV.NUMNOTA,
+            NFE.NUMNOTA
+        ) AS NUMNOTA,
+
+        VOL.ETQVOL,
+
+        COALESCE(
+            ADV.SERIENOTA,
+            NFE.SERIENOTA
+        ) AS SERIENOTA,
+
+        COALESCE(
+            ADV.CHAVENFE,
+            NFE.CHAVENFE
+        ) AS CHAVENFE,
+
+        COALESCE(
+            ADV.CGC_CPF,
+            PAR.CGC_CPF
+        ) AS CNPJ
+
+    FROM AD_PEDCARREGAMENTO PED
+
+        LEFT JOIN AD_ITECARREGAMENTOVOL VOL
+            ON PED.NUNOTA = VOL.NUNOTA
+
+        LEFT JOIN TGFVAR VAR
+            ON PED.NUNOTA = VAR.NUNOTAORIG
+
+        LEFT JOIN TGFCAB NFE
+            ON NFE.NUNOTA = VAR.NUNOTA
+
+        LEFT JOIN TGFPAR PAR
+            ON PAR.CODPARC = NFE.CODPARC
+            
+        LEFT JOIN (
+            SELECT 
+                ADP.ORDEMCARGA,
+                ADV.NUNOTAVENDA,
+                NFE.NUMNOTA,
+                NFE.SERIENOTA,
+                NFE.CHAVENFE,
+                PAR.CGC_CPF,
+                ADP.NUNOTA
+            FROM AD_PEDCARREGAMENTO ADP
+                LEFT JOIN AD_VENDAIPIRANGA ADV ON ADV.NUNOTASEP = ADP.NUNOTA
+                LEFT JOIN TGFCAB NFE ON NFE.NUNOTA = ADV.NUNOTAVENDA
+                LEFT JOIN TGFPAR PAR ON PAR.CODPARC = NFE.CODPARC
+        ) ADV ON ADV.NUNOTA = PED.NUNOTA AND ADV.ORDEMCARGA = PED.ORDEMCARGA
+    WHERE VOL.ETQVOL IS NOT NULL
+
+        AND PED.ORDEMCARGA IN (
+            SELECT ORDEMCARGA
+            FROM AD_CABCARREGAMENTO
+            WHERE FROTA LIKE '%' || :2 || '%'
+                AND TRUNC(DATA) = TRUNC(SYSDATE)
+                AND STATUS = 'F2'
+        )
+)
+ORDER BY ORDEMCARGA, NUMNOTA NULLS LAST
     `;
     // O valor de "frota" é repetido (uma vez por ramo do UNION ALL) — por
     // isso o array de parâmetros tem o mesmo valor duas vezes, casando com
